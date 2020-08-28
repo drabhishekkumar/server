@@ -150,11 +150,14 @@ struct file_name_t {
 	record for the tablespace */
 	lsn_t		enable_lsn;
 
+	/** FSP_SPACE_FLAGS of tablespace */
+	ulint		flags;
+
 	/** Constructor */
 	file_name_t(std::string name_, bool deleted)
 		: name(std::move(name_)), space(NULL),
 		status(deleted ? DELETED: NORMAL),
-		size(0), enable_lsn(0) {}
+		size(0), enable_lsn(0), flags(0) {}
 
 	/** Report a MLOG_INDEX_LOAD operation, meaning that
 	mlog_init for any earlier LSN must be skipped.
@@ -442,8 +445,16 @@ fil_name_process(
 
 			if (f.space == NULL || f.space == space) {
 
-				if (f.size && f.space == NULL) {
-					fil_space_set_recv_size(space->id, f.size);
+				if (!f.space) {
+					if (f.size) {
+						fil_space_set_recv_size(
+							space->id, f.size);
+					}
+
+					if (f.flags) {
+						fil_space_set_flags(
+							space->id, f.flags);
+					}
 				}
 
 				f.name = fname.name;
@@ -2528,12 +2539,19 @@ recv_parse_log_rec(
 		return(0);
 	}
 
-	if (*page_no == 0 && *type == MLOG_4BYTES
-	    && apply
-	    && mach_read_from_2(old_ptr) == FSP_HEADER_OFFSET + FSP_SIZE) {
+	if (*page_no == 0 && *type == MLOG_4BYTES && apply) {
+
+		bool change_size = (mach_read_from_2(old_ptr)
+					== FSP_HEADER_OFFSET + FSP_SIZE);
+		if (!change_size
+		    && (mach_read_from_2(old_ptr)
+			!= FSP_HEADER_OFFSET + FSP_SPACE_FLAGS)) {
+			goto func_exit;
+		}
+
 		old_ptr += 2;
 
-		ulint size = mach_parse_compressed(&old_ptr, end_ptr);
+		ulint val = mach_parse_compressed(&old_ptr, end_ptr);
 
 		recv_spaces_t::iterator it = recv_spaces.find(*space);
 
@@ -2543,12 +2561,20 @@ recv_parse_log_rec(
 		      || it != recv_spaces.end());
 
 		if (it != recv_spaces.end() && !it->second.space) {
-			it->second.size = size;
+			if (change_size) {
+				it->second.size = val;
+			} else {
+				it->second.flags = val;
+			}
 		}
 
-		fil_space_set_recv_size(*space, size);
+		if (change_size) {
+			fil_space_set_recv_size(*space, val);
+		} else {
+			fil_space_set_flags(*space, val);
+		}
 	}
-
+func_exit:
 	return ulint(new_ptr - ptr);
 }
 

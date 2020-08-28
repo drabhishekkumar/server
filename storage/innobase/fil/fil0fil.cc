@@ -1422,6 +1422,20 @@ fil_space_set_recv_size(ulint id, ulint size)
 	mutex_exit(&fil_system.mutex);
 }
 
+/** Set the FSP_SPACE_FLAGS of tablespace.
+@param id	tablespace ID
+@param flags	tablespace flags */
+UNIV_INTERN
+void
+fil_space_set_flags(ulint id, ulint flags)
+{
+  mutex_enter(&fil_system.mutex);
+  if (fil_space_t* space = fil_space_get_space(id))
+    space->flags= flags;
+
+  mutex_exit(&fil_system.mutex);
+}
+
 /*******************************************************************//**
 Returns the size of the space in pages. The tablespace must be cached in the
 memory cache.
@@ -3834,6 +3848,7 @@ void fsp_flags_try_adjust(fil_space_t* space, ulint flags)
 		    page_id_t(space->id, 0), space->zip_size(),
 		    RW_X_LATCH, &mtr)) {
 		ulint f = fsp_header_get_flags(b->frame);
+
 		if (fil_space_t::full_crc32(f)) {
 			goto func_exit;
 		}
